@@ -22,3 +22,7 @@ dist/
 .env.*
 !.env.example
 
+# Approved examples and completed releases are intentionally versioned.
+!samples/example-files/**
+!releases/completed/**
+
