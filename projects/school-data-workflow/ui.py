@@ -486,8 +486,17 @@ class WorkflowWindow(QMainWindow):
         details = self.clean_plan.explanation
         if self.clean_plan.warnings:
             details += "\n확인 필요: " + " ".join(self.clean_plan.warnings)
-        details += f"\n해석 신뢰도 {self.clean_plan.confidence:.0%} · 실행 전 미리보기로 검증합니다."
+        details += f"\n해석 신뢰도 {self.clean_plan.confidence:.0%} · 아래 표에 예상 결과를 표시합니다."
         self.plan_label.setText(details)
+        # 요청을 입력하는 즉시 실제 정리 함수를 실행해, 사용자가 '다음'을
+        # 누르기 전에 합계·삭제·정렬 결과를 확인할 수 있게 한다. 결과는
+        # 확정 전까지 results에 저장하지 않고 미리보기만 갱신한다.
+        if self.stage == 2 and self.request.toPlainText().strip() and not self.clean_plan.warnings:
+            try:
+                preview = apply_clean_plan(source, self.clean_plan)
+                self._show_table(preview, "정리 예상 결과 · 저장 전", baseline=source)
+            except Exception as exc:
+                self.preview_status.setText(f"미리보기 생성 실패: {exc}")
 
     def privacy_choice_changed(self) -> None:
         self.privacy_enabled = self.privacy_on.isChecked()
