@@ -99,6 +99,11 @@ def _split_header_rows(values: list[list[Any]]) -> tuple[list[str], list[list[An
     """Skip title/blank preamble rows and select the most plausible header row."""
     if not values:
         raise WorkflowError("빈 파일입니다.")
+    first_nonempty = sum(bool(_text(cell)) for cell in values[0])
+    # 정상적인 표는 첫 행이 헤더다. 첫 행이 제목 한 칸/빈 행인 경우에만
+    # 아래쪽 후보를 살펴보아 CSV의 첫 행 헤더를 데이터로 오인하지 않는다.
+    if first_nonempty >= 2:
+        return _unique_headers(values[0]), values[1:]
     candidates = values[: min(20, len(values))]
     best_index = 0
     best_score = float("-inf")
