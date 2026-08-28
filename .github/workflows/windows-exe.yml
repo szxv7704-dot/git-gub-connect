@@ -25,8 +25,7 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: python -m pytest projects/school-data-workflow/tests -q
       - name: Build executable
-        shell: pwsh
-        run: ./projects/school-data-workflow/build.ps1 -SkipInstall
+        run: python -m PyInstaller --noconfirm --clean projects/school-data-workflow/SchoolDataWorkflow.spec
       - name: Smoke test executable
         run: ./dist/학교자료취합도우미.exe --self-test
       - name: Upload verified executable
