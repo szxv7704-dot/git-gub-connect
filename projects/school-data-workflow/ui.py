@@ -459,7 +459,11 @@ class WorkflowWindow(QMainWindow):
         self.preview_table.setRowCount(len(rows))
         for row_index, row in enumerate(rows):
             for column, value in enumerate(row):
-                item = QTableWidgetItem("" if value is None else str(value))
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    shown = f"{value:,.0f}" if float(value).is_integer() else f"{value:,.2f}"
+                else:
+                    shown = "" if value is None else str(value)
+                item = QTableWidgetItem(shown)
                 if row_index == 0:
                     item.setBackground(QColor("#F8FBFF"))
                 if baseline and headers[column] in baseline.headers and row_index < len(baseline.rows):

@@ -89,6 +89,14 @@ def test_read_table_skips_preamble_and_resolves_ordinal_column(tmp_path: Path) -
     assert cleaned.rows == [["동부", 100.0]]
 
 
+def test_specific_column_contains_filter_is_applied() -> None:
+    table = TableData(["순", "지역", "신청금액"], [["소계(전주)", "전주", 10], [1, "전주", 20]])
+    plan = plan_cleaning("순열에 '소계'가 들어간 행은 삭제해줘", table)
+    assert not plan.warnings
+    cleaned = apply_clean_plan(table, plan)
+    assert cleaned.rows == [[1, "전주", 20]]
+
+
 @pytest.mark.parametrize("command", [
     "지역별 신청금액 합산",
     "신청금액이 없는 행 삭제",

@@ -378,6 +378,11 @@ def plan_cleaning(request: str, table: TableData) -> CleanPlan:
         if re.search(r"빈\s*칸|공백\s*(?:행)?\s*(?:제거|삭제)|누락|(?:값|금액|내용)이?\s*없는|없는\s*행", clause):
             operation = "flag_blanks" if re.search(r"표시|찾|확인|점검", clause) else "drop_blanks"
             actions.append(CleanAction(operation, tuple(clause_columns)))
+        if re.search(r"(?:들어간|포함|있는).*행.*(?:지워|삭제|제거)", clause):
+            quoted = re.findall(r"['\"‘’“”]([^'\"‘’“”]+)['\"‘’“”]", clause)
+            contains = quoted[-1] if quoted else None
+            if contains and clause_columns:
+                actions.append(CleanAction("drop_contains", tuple(clause_columns), contains))
         if re.search(r"합계|합산|더해|총합|평균|개수|건수|세어", clause):
             if len(clause_columns) < 2:
                 actions.append(CleanAction("summarize", tuple(clause_columns)))
@@ -414,7 +419,7 @@ def plan_cleaning(request: str, table: TableData) -> CleanPlan:
             warnings.append(f"'{action.operation}' 작업의 대상 열을 찾지 못했습니다.")
     confidence = 0.0 if not clauses else max(0.0, min(1.0, recognized_clauses / len(clauses)))
     labels = {
-        "deduplicate": "중복 행 제거", "drop_blanks": "빈칸 행 제거", "flag_blanks": "빈칸 표시",
+        "deduplicate": "중복 행 제거", "drop_blanks": "빈칸 행 제거", "flag_blanks": "빈칸 표시", "drop_contains": "특정 문구 포함 행 제거",
         "sort": "정렬", "sum": "그룹별 합계", "average": "그룹별 평균", "count": "그룹별 개수",
         "trim": "공백 정리", "normalize_date": "날짜 통일", "normalize_number": "숫자 통일",
         "replace": "값 바꾸기", "summarize": "요약",
@@ -471,6 +476,11 @@ def apply_clean_plan(table: TableData, plan: CleanPlan) -> TableData:
                 for row in result.rows:
                     missing = [result.headers[i] for i in positions if not _text(row[i])]
                     row.append(", ".join(missing) if missing else "정상")
+        elif action.operation == "drop_contains":
+            if not positions or not action.value:
+                raise WorkflowError("문구를 찾을 열과 삭제할 문구를 함께 지정하세요.")
+            needle = action.value.casefold()
+            result.rows = [row for row in result.rows if not any(needle in _text(row[i]).casefold() for i in positions)]
         elif action.operation == "sort":
             if not positions:
                 raise WorkflowError("정렬할 열을 요청에 포함하세요.")
@@ -537,6 +547,10 @@ def save_table(table: TableData, path: Path, sheet_name: str = "결과") -> Path
     ws.append(table.headers)
     for row in table.normalized().rows:
         ws.append(row)
+    for row in ws.iter_rows(min_row=2):
+        for cell in row:
+            if isinstance(cell.value, (int, float)) and not isinstance(cell.value, bool):
+                cell.number_format = "#,##0.##"
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
     for cell in ws[1]:
@@ -586,6 +600,10 @@ def save_clean_workbook(
     data_sheet.append(formula_source.headers)
     for row in formula_source.rows:
         data_sheet.append(row)
+    for row in data_sheet.iter_rows(min_row=2):
+        for cell in row:
+            if isinstance(cell.value, (int, float)) and not isinstance(cell.value, bool):
+                cell.number_format = "#,##0.##"
     data_sheet.freeze_panes = "A2"
     data_sheet.auto_filter.ref = data_sheet.dimensions
 
@@ -604,6 +622,11 @@ def save_clean_workbook(
             function = "SUMIFS" if aggregation.operation == "sum" else "AVERAGEIFS"
             formula = f"={function}('원본데이터'!${value_letter}$2:${value_letter}${last_row},{','.join(criteria)})"
         result_sheet.cell(output_row, len(preview.headers), formula)
+
+    for row in result_sheet.iter_rows(min_row=2):
+        for cell in row:
+            if isinstance(cell.value, (int, float)) and not isinstance(cell.value, bool):
+                cell.number_format = "#,##0.##"
 
     result_sheet.freeze_panes = "A2"
     result_sheet.auto_filter.ref = result_sheet.dimensions

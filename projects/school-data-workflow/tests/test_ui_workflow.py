@@ -46,7 +46,7 @@ def test_ui_runs_the_full_pipeline_and_updates_each_preview(tmp_path: Path, monk
     assert window.clean_plan is not None
     assert [action.operation for action in window.clean_plan.actions] == ["sum", "sort"]
     assert window.preview_table.item(0, 0).text() == "동부"
-    assert window.preview_table.item(0, 1).text() == "6.0"
+    assert window.preview_table.item(0, 1).text() == "6"
     window.next()
     assert window.stage == 3
     assert window.results[2].headers == ["지역", "학생 수 합계"]
