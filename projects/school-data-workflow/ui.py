@@ -32,6 +32,8 @@ from PySide6.QtWidgets import (
 )
 
 from workflow_core import (
+    CleanAction,
+    CleanPlan,
     MaskRule,
     TableData,
     WorkflowError,
@@ -267,6 +269,26 @@ class WorkflowWindow(QMainWindow):
         self.request.setMinimumHeight(120)
         self.request.textChanged.connect(self.analyze_request)
         panel.layout.addWidget(self.request)
+        self.manual_panel = QFrame()
+        self.manual_panel.setObjectName("subPanel")
+        manual_layout = QVBoxLayout(self.manual_panel)
+        manual_layout.addWidget(QLabel("자연어가 정확히 해석되지 않으면 여기서 직접 선택하세요"))
+        manual_row = QHBoxLayout()
+        self.manual_operation = QComboBox()
+        self.manual_operation.addItems(["직접 선택 안 함", "합계", "평균", "개수", "중복 제거", "빈칸 행 제거", "정렬"])
+        self.manual_group = QComboBox()
+        self.manual_value = QComboBox()
+        self.manual_apply = QPushButton("선택 설정으로 미리보기")
+        self.manual_apply.clicked.connect(self.apply_manual_cleaning)
+        manual_row.addWidget(QLabel("작업"))
+        manual_row.addWidget(self.manual_operation, 1)
+        manual_row.addWidget(QLabel("그룹/기준 열"))
+        manual_row.addWidget(self.manual_group, 1)
+        manual_row.addWidget(QLabel("계산/대상 열"))
+        manual_row.addWidget(self.manual_value, 1)
+        manual_row.addWidget(self.manual_apply)
+        manual_layout.addLayout(manual_row)
+        panel.layout.addWidget(self.manual_panel)
         examples = QLabel("빠른 예시")
         examples.setObjectName("fieldLabel")
         panel.layout.addWidget(examples)
@@ -482,6 +504,7 @@ class WorkflowWindow(QMainWindow):
         if not source:
             self.clean_plan = None
             return
+        self._populate_manual_columns(source)
         self.clean_plan = plan_cleaning(self.request.toPlainText(), source)
         details = self.clean_plan.explanation
         if self.clean_plan.warnings:
@@ -497,6 +520,52 @@ class WorkflowWindow(QMainWindow):
                 self._show_table(preview, "정리 예상 결과 · 저장 전", baseline=source)
             except Exception as exc:
                 self.preview_status.setText(f"미리보기 생성 실패: {exc}")
+
+    def _populate_manual_columns(self, source: TableData) -> None:
+        if not hasattr(self, "manual_group"):
+            return
+        current_group = self.manual_group.currentText()
+        current_value = self.manual_value.currentText()
+        for combo in (self.manual_group, self.manual_value):
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem("(선택 안 함)")
+            combo.addItems(source.headers)
+            combo.blockSignals(False)
+        if current_group in source.headers:
+            self.manual_group.setCurrentText(current_group)
+        if current_value in source.headers:
+            self.manual_value.setCurrentText(current_value)
+
+    def apply_manual_cleaning(self) -> None:
+        source = self.results.get(1) or self.results.get(0)
+        if not source:
+            return
+        operation = self.manual_operation.currentText()
+        group = self.manual_group.currentText()
+        value = self.manual_value.currentText()
+        mapping = {"합계": "sum", "평균": "average", "개수": "count", "중복 제거": "deduplicate", "빈칸 행 제거": "drop_blanks", "정렬": "sort"}
+        if operation not in mapping:
+            return
+        code = mapping[operation]
+        if code in {"sum", "average", "count"}:
+            columns = tuple(item for item in (group, value) if item != "(선택 안 함)")
+        elif code == "deduplicate":
+            columns = (group,) if group != "(선택 안 함)" else ()
+        else:
+            columns = (value,) if value != "(선택 안 함)" else ((group,) if group != "(선택 안 함)" else ())
+        if code in {"sum", "average", "count"} and len(columns) != 2:
+            self.preview_status.setText("그룹/기준 열과 계산/대상 열을 모두 선택하세요.")
+            return
+        if code in {"deduplicate", "drop_blanks", "sort"} and not columns:
+            self.preview_status.setText("대상 열을 선택하세요.")
+            return
+        self.clean_plan = CleanPlan("직접 선택", [CleanAction(code, columns)], "직접 선택한 작업", 1.0)
+        try:
+            preview = apply_clean_plan(source, self.clean_plan)
+            self._show_table(preview, "직접 선택 결과 · 저장 전", baseline=source)
+        except Exception as exc:
+            self.preview_status.setText(f"미리보기 생성 실패: {exc}")
 
     def privacy_choice_changed(self) -> None:
         self.privacy_enabled = self.privacy_on.isChecked()
@@ -521,6 +590,10 @@ class WorkflowWindow(QMainWindow):
             "최종 결과를 저장하기 전에 마지막으로 확인합니다.",
         )
         self.preview_caption.setText(captions[self.stage])
+        if self.stage == 2:
+            source_for_controls = self.results.get(1) or self.results.get(0)
+            if source_for_controls:
+                self._populate_manual_columns(source_for_controls)
         if self.stage in self.results:
             baseline = self.results.get(0) if self.stage == 1 else None
             self._show_table(self.results[self.stage], baseline=baseline)

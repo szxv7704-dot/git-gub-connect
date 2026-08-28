@@ -68,6 +68,45 @@ def test_merge_matches_headers_despite_spacing_and_case(tmp_path: Path) -> None:
     assert not merged.warnings
 
 
+def test_read_table_skips_preamble_and_resolves_ordinal_column(tmp_path: Path) -> None:
+    path = tmp_path / "신청자료.xlsx"
+    book = Workbook()
+    sheet = book.active
+    sheet.append(["2026년 신청 현황"])
+    sheet.append([])
+    sheet.append(["작성기관", "홍은성"])
+    sheet.append([])
+    sheet.append(["지역", "학교명", "신청금액", "비고", "상태", "대상"])
+    sheet.append(["동부", "가학교", 100, "", "", "Y"])
+    sheet.append(["서부", "나학교", None, "", "", "Y"])
+    book.save(path)
+    table = read_table(path)
+    assert table.headers == ["지역", "학교명", "신청금액", "비고", "상태", "대상"]
+    assert len(table.rows) == 2
+    plan = plan_cleaning("지역별 신청금액을 합산하고 3열의 값이 없는 행은 삭제해줘", table)
+    assert not plan.warnings
+    cleaned = apply_clean_plan(table, plan)
+    assert cleaned.rows == [["동부", 100.0]]
+
+
+@pytest.mark.parametrize("request", [
+    "지역별 신청금액 합산",
+    "신청금액이 없는 행 삭제",
+    "학교명과 성명이 같은 중복 행 제거",
+    "신청일 날짜 형식 통일",
+    "신청금액 숫자와 콤마 형식 정리",
+    "지역을 가나다순으로 정렬",
+])
+def test_common_natural_language_commands_are_recognized(request: str) -> None:
+    table = TableData(
+        ["지역", "학교명", "성명", "신청일", "신청금액"],
+        [["동부", "가학교", "김민수", "2026.1.2", "1,000"]],
+    )
+    plan = plan_cleaning(request, table)
+    assert plan.actions or plan.warnings
+    assert plan.confidence > 0
+
+
 def test_mask_modes_full_partial_and_drop() -> None:
     original = TableData(["성명", "연락처", "이메일", "주소", "비고"], [["김민수", "010-1234-5678", "teacher@example.com", "서울시 종로구 사직로 1", "유지"]])
     rules = [MaskRule("성명", "partial", "이름"), MaskRule("연락처", "partial", "전화번호"), MaskRule("이메일", "full", "이메일"), MaskRule("주소", "drop", "주소")]

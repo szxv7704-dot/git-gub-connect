@@ -95,6 +95,28 @@ def _unique_headers(values: Iterable[Any]) -> list[str]:
     return result
 
 
+def _split_header_rows(values: list[list[Any]]) -> tuple[list[str], list[list[Any]]]:
+    """Skip title/blank preamble rows and select the most plausible header row."""
+    if not values:
+        raise WorkflowError("빈 파일입니다.")
+    candidates = values[: min(20, len(values))]
+    best_index = 0
+    best_score = float("-inf")
+    for index, row in enumerate(candidates):
+        cells = [_text(cell) for cell in row]
+        nonempty = [cell for cell in cells if cell]
+        if not nonempty:
+            continue
+        text_like = sum(not re.fullmatch(r"[-+]?\\d+(?:[.,]\\d+)?", cell) for cell in nonempty)
+        unique = len({_key(cell) for cell in nonempty})
+        # Prefer a wide, text-heavy, unique row; lightly prefer earlier rows.
+        score = len(nonempty) * 3 + text_like * 2 + unique - index * 0.15
+        if score > best_score:
+            best_score = score
+            best_index = index
+    return _unique_headers(values[best_index]), values[best_index + 1 :]
+
+
 def read_table(path: Path, sheet_name: str | None = None) -> TableData:
     path = Path(path)
     if not path.exists():
@@ -124,23 +146,23 @@ def read_table(path: Path, sheet_name: str | None = None) -> TableData:
             raise WorkflowError(f"CSV 문자 인코딩을 읽을 수 없습니다: {last_error}")
         if not values:
             raise WorkflowError(f"빈 파일입니다: {path.name}")
-        headers = _unique_headers(_safe_csv_value(value) for value in values[0])
+        values = [[_safe_csv_value(value) for value in row] for row in values]
+        headers, body = _split_header_rows(values)
         if len(headers) > MAX_COLUMNS:
             raise WorkflowError(f"열 수가 안전 처리 한도({MAX_COLUMNS}열)를 넘습니다: {path.name}")
-        rows = [row for row in values[1:] if any(_text(cell) for cell in row)]
+        rows = [row for row in body if any(_text(cell) for cell in row)]
     elif suffix in {".xlsx", ".xlsm"}:
         book = load_workbook(path, read_only=True, data_only=False)
         try:
             ws = book[sheet_name] if sheet_name else book[book.sheetnames[0]]
             if (ws.max_row or 0) > MAX_ROWS + 1 or (ws.max_column or 0) > MAX_COLUMNS:
                 raise WorkflowError(f"표 크기가 안전 처리 한도를 넘습니다: {path.name}")
-            iterator = ws.iter_rows(values_only=True)
-            first = next(iterator, None)
-            if first is None:
+            raw_rows = [list(row) for row in ws.iter_rows(values_only=True)]
+            if not raw_rows:
                 raise WorkflowError(f"빈 시트입니다: {path.name}")
-            headers = _unique_headers(first)
+            headers, body = _split_header_rows(raw_rows)
             rows = []
-            for row_number, row in enumerate(iterator, 2):
+            for row_number, row in enumerate(body, 2):
                 if row_number > MAX_ROWS + 1:
                     raise WorkflowError(f"행 수가 안전 처리 한도({MAX_ROWS:,}행)를 넘습니다: {path.name}")
                 if len(row) > MAX_COLUMNS:
@@ -320,6 +342,11 @@ def verify_masking(original: TableData, masked: TableData, rules: Iterable[MaskR
 def _resolve_columns(request: str, headers: list[str]) -> list[str]:
     compact = _key(request)
     matches = [header for header in headers if _key(header) and _key(header) in compact]
+    # 사용자가 화면의 열 번호를 그대로 말하는 경우도 실제 헤더로 변환한다.
+    for raw_index in re.findall(r"(?:열|컬럼|번째\s*열)\s*(\d+)", request):
+        index = int(raw_index) - 1
+        if 0 <= index < len(headers) and headers[index] not in matches:
+            matches.append(headers[index])
     # 따옴표 안 표현은 띄어쓰기나 기호가 다른 헤더도 비교한다.
     quoted = re.findall(r"['\"‘’“”]([^'\"‘’“”]+)['\"‘’“”]", request)
     for phrase in quoted:
@@ -343,7 +370,7 @@ def plan_cleaning(request: str, table: TableData) -> CleanPlan:
         before_count = len(actions)
         if re.search(r"중복|겹치", clause):
             actions.append(CleanAction("deduplicate", tuple(clause_columns)))
-        if re.search(r"빈\s*칸|공백\s*(?:행)?\s*(?:제거|삭제)|누락", clause):
+        if re.search(r"빈\s*칸|공백\s*(?:행)?\s*(?:제거|삭제)|누락|(?:값|금액|내용)이?\s*없는|없는\s*행", clause):
             operation = "flag_blanks" if re.search(r"표시|찾|확인|점검", clause) else "drop_blanks"
             actions.append(CleanAction(operation, tuple(clause_columns)))
         if re.search(r"합계|합산|더해|총합|평균|개수|건수|세어", clause):
