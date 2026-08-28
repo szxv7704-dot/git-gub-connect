@@ -89,7 +89,7 @@ def test_read_table_skips_preamble_and_resolves_ordinal_column(tmp_path: Path) -
     assert cleaned.rows == [["동부", 100.0]]
 
 
-@pytest.mark.parametrize("request", [
+@pytest.mark.parametrize("command", [
     "지역별 신청금액 합산",
     "신청금액이 없는 행 삭제",
     "학교명과 성명이 같은 중복 행 제거",
@@ -97,12 +97,12 @@ def test_read_table_skips_preamble_and_resolves_ordinal_column(tmp_path: Path) -
     "신청금액 숫자와 콤마 형식 정리",
     "지역을 가나다순으로 정렬",
 ])
-def test_common_natural_language_commands_are_recognized(request: str) -> None:
+def test_common_natural_language_commands_are_recognized(command: str) -> None:
     table = TableData(
         ["지역", "학교명", "성명", "신청일", "신청금액"],
         [["동부", "가학교", "김민수", "2026.1.2", "1,000"]],
     )
-    plan = plan_cleaning(request, table)
+    plan = plan_cleaning(command, table)
     assert plan.actions or plan.warnings
     assert plan.confidence > 0
 
