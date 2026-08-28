@@ -28,7 +28,9 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    # UPX 압축된 Qt DLL은 일부 Windows 환경에서 QtWidgets 로딩 실패를 일으킬 수 있다.
+    # 배포 안정성을 위해 Qt DLL을 압축하지 않는다.
+    upx=False,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
