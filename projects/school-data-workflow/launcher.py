@@ -1,6 +1,26 @@
 from __future__ import annotations
 
 import sys
+import os
+
+
+def _prepare_bundled_dlls() -> None:
+    """Ensure bundled Qt DLLs win over DLLs installed elsewhere on Windows."""
+    if sys.platform != "win32":
+        return
+    bundle_dir = getattr(sys, "_MEIPASS", None)
+    if not bundle_dir:
+        return
+    # PyInstaller normally configures this, but an installed Qt/PySide6 can
+    # otherwise satisfy QtWidgets with a mismatched QtCore on some PCs.
+    try:
+        os.add_dll_directory(bundle_dir)
+    except (AttributeError, OSError):
+        pass
+    os.environ["PATH"] = bundle_dir + os.pathsep + os.environ.get("PATH", "")
+
+
+_prepare_bundled_dlls()
 
 
 if "--self-test" in sys.argv:
