@@ -21,9 +21,17 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r projects/school-data-workflow/requirements.txt pyinstaller==6.11.1 pytest
       - name: Run tests
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python -m pytest projects/school-data-workflow/tests -q
+        shell: pwsh
+        run: |
+          python -m pytest projects/school-data-workflow/tests -q --tb=long 2>&1 | Tee-Object pytest.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-log
+          path: pytest.log
+          if-no-files-found: ignore
       - name: Build executable
         run: python -m PyInstaller --noconfirm --clean projects/school-data-workflow/SchoolDataWorkflow.spec
       - name: Smoke test executable
