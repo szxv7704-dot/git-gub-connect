@@ -18,8 +18,8 @@ FILLS = {
 WIDTHS = (10, 10, 34, 24, 56, 16, 16, 16)
 
 
-def export_issues(output: str, session, reports: dict) -> str:
-    """reports: {"목표1": Report, "목표2A": Report, …}"""
+def export_issues(output: str, session, reports: dict, writing=None) -> str:
+    """reports: {"목표1": Report, "목표2A": Report, …}. writing: 작성 점검(WritingReport) — 따로 시트."""
     book = Workbook()
     sheet = book.active
     sheet.title = "지적 목록"
@@ -65,6 +65,24 @@ def export_issues(output: str, session, reports: dict) -> str:
             missed.append([goal_label(goal), session.label_of(issue.project), issue.item, issue.message])
         for column, width in zip("ABCD", (12, 34, 24, 80)):
             missed.column_dimensions[column].width = width
+
+    # 작성 점검은 오류가 아니다. 한 시트에 섞으면 '오류 3건'이 작성 점검 100건에 묻힌다.
+    if writing is not None and writing.issues:
+        check = book.create_sheet("작성 점검")
+        check.append(["분류", "사업", "찾을 글자", "내용", "설명서(천원)", "기준·작년(천원)"])
+        for cell in check[1]:
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill("solid", fgColor="EDEFF2")
+        for issue in writing.issues:
+            check.append([goal_label(issue.goal), session.label_of(issue.project), issue.item, issue.message,
+                          issue.left, issue.right])
+            for column in ("E", "F"):
+                check[f"{column}{check.max_row}"].number_format = "#,##0"
+        for column, width in zip("ABCDEF", (12, 30, 26, 90, 14, 14)):
+            check.column_dimensions[column].width = width
+        for row in check.iter_rows(min_row=2, min_col=4, max_col=4):
+            row[0].alignment = Alignment(wrap_text=True, vertical="top")
+        check.freeze_panes = "A2"
 
     unsettled = book.create_sheet("비목 미확정")
     unsettled.append(["목코드", "비목명", "항목명", "행 수", "사유"])

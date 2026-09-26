@@ -52,6 +52,7 @@ class Session:
     supplement: object = None         # supplement.SuppDocument
     supplement_ubis: object = None    # supplement.UbisSupp
     supplement_report: Report = field(default_factory=Report)   # UBIS 대조 + 직전 차수 연결
+    writing_report: object = None     # writing_check.WritingReport — 작성요령 점검(확인 필요, 막지 않음)
     previous_used: str = ""           # 직전 차수 연결에 실제로 쓴 검토조서
 
     @property
@@ -119,9 +120,33 @@ class Session:
 
         step("금액을 검사하는 중…", 0.88)
         self.plan_report = check_plan(self.projects)
+        step("작성요령대로 썼는지 보는 중…", 0.91)
+        self._check_writing()
         step("비목을 맞추는 중…", 0.95)
         self.bimok_report, self.resolutions = check_bimok(self.projects, self.resolver)
         step("끝났습니다.", 1.0)
+
+    def _check_writing(self) -> None:
+        """작성요령 점검. 실패해도 불러오기는 막지 않는다 — 금액 검산이 본업이다."""
+        from edufine_form import read_form
+        from writing_check import WritingReport, check_writing
+
+        rows = []
+        if not self.is_supplement:
+            for path in [self.last_year_path, *self.extra_last_year]:
+                try:
+                    rows += read_form(path) if path else []
+                except Exception:  # noqa: BLE001 - 예산현액 조회 서식 등은 단가 비교에 못 쓴다
+                    pass
+        try:
+            report = check_writing(self.plan_path, self.projects, rows)
+        except Exception as error:  # noqa: BLE001
+            report = WritingReport()
+            report.skipped.append(str(error))
+        # 과제카드로 좁혔으면 내 사업 것만 남긴다.
+        names = {project.name for project in self.projects}
+        report.issues = [issue for issue in report.issues if issue.project in names]
+        self.writing_report = report
 
     def _load_supplement(self, step) -> None:
         """추경 설명서. 산출식이 증감분만 있어 입력본은 만들지 않고 점검만 한다.
@@ -148,6 +173,7 @@ class Session:
              "읽었습니다.", 0.4)
         self.plan_report = check_supplement(document)
         step("설명서 안의 증감·산출식·합계를 맞춰 봤습니다.", 0.6)
+        self._check_writing()
 
         report = Report()
         self.ubis, self.supplement_ubis = {}, None

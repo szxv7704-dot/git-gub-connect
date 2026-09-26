@@ -10,6 +10,7 @@ parse_kordoc_chunks 이후의 처리 흐름을 그대로 재사용한다.
 
 from __future__ import annotations
 
+import functools
 import re
 import zipfile
 import xml.etree.ElementTree as ET
@@ -118,7 +119,30 @@ def _walk(element, output: list) -> None:
 
 
 def native_chunks(path: str) -> list[dict]:
-    """HWPX를 kordoc 청크와 같은 구조의 dict 목록으로 변환한다."""
+    """HWPX를 kordoc 청크와 같은 구조의 dict 목록으로 변환한다.
+
+    설명서 파서와 작성 점검이 같은 파일을 읽는다. 읽기(XML 해석)가 불러오기 시간의
+    대부분이라, 파일이 그대로면(경로·수정 시각·크기가 같으면) 한 번 읽은 것을 쓴다.
+    받는 쪽이 고쳐도 다른 쪽에 번지지 않도록 dict 는 새로 만들어 준다.
+    """
+    import os
+
+    try:
+        stat = os.stat(path)
+        key = (os.path.abspath(path), stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        key = None
+    if key is None:
+        return _read_chunks(path)
+    return [dict(chunk) for chunk in _cached_chunks(key)]
+
+
+@functools.lru_cache(maxsize=4)
+def _cached_chunks(key: tuple) -> tuple:
+    return tuple(_read_chunks(key[0]))
+
+
+def _read_chunks(path: str) -> list[dict]:
     chunks: list[dict] = []
     breadcrumb = ""
     pending: list[str] = []

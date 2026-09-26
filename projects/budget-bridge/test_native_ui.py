@@ -305,6 +305,39 @@ class NativeUITests(unittest.TestCase):
         app.show('files')
         self.assertFalse(self.errors)
 
+    def test_writing_checks_have_their_own_list(self):
+        """작성 점검은 오류 목록에 섞이지 않고 '작성 점검' 구분에 따로 모인다."""
+        from converter import Session
+        from crosscheck import Issue
+        from plan_parser import PlanProject
+        from writing_check import WritingReport
+
+        app = self.app
+        session = Session()
+        session.projects = [PlanProject(name='표본사업', heading='3. 표본사업')]
+        session.writing_report = WritingReport([Issue('작성-표기', '확인 필요', '표본사업', '편성·운영',
+                                                      '가운뎃점은 ․ 를 씁니다.', blocking=False)])
+        app.session = session
+        app.show('result')
+        app.set_filter('오류')
+        app.update()
+        self.assertEqual(app.issues, [])
+        self.assertIn('작성 점검  1', app.filter_buttons['작성 점검'].cget('text'))
+        app.set_filter('작성 점검')
+        app.update()
+        self.assertEqual(len(app.issues), 1)
+        app._select(0)
+        app.update()
+        self.assertEqual(app._find_for('plan', app.issues[0][1]), '편성·운영', '걸린 글자로 찾아가야 한다')
+        app.open_detail()
+        app.update()
+        self.assertEqual(app.find_value.get(), '편성·운영')
+        app.session = Session()
+        app.issues = []
+        app.set_filter('오류')
+        app.show('files')
+        self.assertFalse(self.errors)
+
     def test_flow_arrows_are_bold(self):
         """단계 사이 화살표는 굵고 곧아야 한다. 가는 연한 물결선은 흐름으로 읽히지 않았다."""
         flow = self.app.file_view.flow

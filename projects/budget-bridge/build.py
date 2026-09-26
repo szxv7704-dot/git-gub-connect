@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-VERSION = "2.16.0"
+VERSION = "2.17.0"
 LABEL = "UI개선"
 NAME = f"예산요구_입력본_만들기_{VERSION}_{LABEL}"
 DIST = "dist_ui"          # 기존 dist\ 의 실행 파일을 덮어쓰지 않는다.
@@ -25,7 +25,7 @@ ENTRY = "budget_bridge.py"
 HIDDEN = ["converter", "plan_parser", "edufine_form", "bimok_resolver", "bimok_groups",
           "crosscheck", "ubis_review", "hwpx_native_parser", "ui_common", "settings",
           "report_export", "program_classes", "program_cards", "tutorial", "native_ui", "supplement",
-          "supplement_form"]
+          "supplement_form", "writing_check"]
 SAMPLES = [
     "(제거)(본예산)부서별사업별 설명서(작성)_2026.9.17_17_42_49.hwpx",
     "(에듀파인)2026세출예산요구내역.xlsx",

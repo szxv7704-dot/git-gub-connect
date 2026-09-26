@@ -2018,3 +2018,146 @@ class SupplementFormSampleTests(unittest.TestCase):
         finally:
             line.amount -= 5
         self.assertTrue(any("입력본" in one.message and line.name in one.message for one in report.issues))
+
+
+class WritingCheckTests(unittest.TestCase):
+    """작성 점검(writing_check). 근거: 2027 본예산 사업담당자 전달사항(작성요령, '26.8.)."""
+
+    @staticmethod
+    def _text(*lines):
+        from writing_check import _Block, _Collector, _money_rules, _text_rules
+        out = _Collector()
+        block = _Block("표본사업", "text", list(lines))
+        _text_rules(block, out)
+        _money_rules(block, out)
+        return out.issues()
+
+    @staticmethod
+    def _items(*items, policy="교수학습활동지원"):
+        from writing_check import _Collector, _bimok_rules, _formula_rules, _parents, _price_rules, _term_rules
+        project = PlanProject(name="표본사업", policy=policy)
+        project.items = list(items)
+        out = _Collector()
+        for index, item in enumerate(project.items):
+            parents = _parents(project.items, index)
+            _formula_rules(project, index, item, out)
+            _term_rules(project, index, item, out)
+            _price_rules(project, index, item, out)
+            _bimok_rules(project, index, item, parents, out)
+        return out.issues()
+
+    def test_character_rules(self):
+        found = self._text("❍ 목적 : 교육과정 편성·운영 지원", "단위:천원", "(2개월 → 4개월)", "2027. 3. ∼ 12.",
+                           "계획(‘23~‘27)", "알림(교육부 OO과-123, 2026. 9. 20.)", "연락처 063-239-3000")
+        words = " ".join(one.message for one in found)
+        for expected in ("가운뎃점", "콜론", "화살표", "내지", "작은따옴표", "공문대호", "063"):
+            self.assertIn(expected, words)
+        self.assertTrue(all(one.severity == "확인 필요" and not one.blocking for one in found))
+
+    def test_clean_text_is_quiet(self):
+        found = self._text("❍ 사업기간 : 2027. 1. ~ 2027. 12.", "초․중등교육법 제23조", "(2개월→4개월)",
+                           "알림(교육부 OO과-123, 2026.9.20.)", "'27년 운영", "10:00 ~ 12:00 운영", "20,000천원")
+        self.assertEqual(found, [])
+
+    def test_same_rule_is_grouped_per_project(self):
+        found = self._text("편성·운영", "제작·보급", "설계·운영")
+        self.assertEqual(len(found), 1)
+        self.assertIn("3곳", found[0].message)
+
+    def test_forbidden_items_only_at_diamond_level(self):
+        """◆시기·◆방법은 금지, ▸ 아래의 시기·방법은 요령이 권하는 자리다."""
+        self.assertTrue(self._text("\U000F02EF방법 : 실비 지원"))
+        self.assertEqual(self._text("\U000F02FB시기 : 2027. 2."), [])
+
+    def test_money_commas(self):
+        found = self._text("사업비 1,00,000천원", "합계 1234567원")
+        self.assertEqual(len(found), 2)
+
+    def test_formula_rules(self):
+        found = self._items(PlanItem(depth=3, name="기본", formula="160,000원×2시간×2명", amount=640),
+                            PlanItem(depth=3, name="지원", formula="1,000,000원×7교", amount=7000),
+                            PlanItem(depth=3, name="수당", formula="400,000원×25명×12개월", amount=120000),
+                            PlanItem(depth=3, name="자료", formula="20부×5,000원", amount=100))
+        words = " ".join(one.message for one in found)
+        for expected in ("시간 뒤", "개교", "'월'", "맨 앞"):
+            self.assertIn(expected, words)
+        self.assertEqual(self._items(PlanItem(depth=3, name="강사수당", formula="160,000원×2명×2시간×2회",
+                                              amount=1280)), [])
+
+    def test_prices_use_only_stated_standards(self):
+        """요령의 산출식 예시(강사수당 100천원 등)는 상한이 아니다 — 명시된 기준만 본다."""
+        found = self._items(PlanItem(depth=3, name="협의회", formula="10,000원×20명×2회", amount=400),
+                            PlanItem(depth=3, name="간식비", formula="5,000원×30명×1회", amount=150),
+                            PlanItem(depth=3, name="식비", formula="11,000원×20명×3식", amount=660,
+                                     bimok_code5="230-02"),
+                            PlanItem(depth=3, name="운영용품", formula="30,000원×5종×1회", amount=150))
+        self.assertEqual(len(found), 4, [one.message for one in found])
+        quiet = self._items(PlanItem(depth=3, name="식비", formula="11,000원×20명×3식", amount=660,
+                                     bimok_code5="210-12"),
+                            PlanItem(depth=3, name="강사수당", formula="160,000원×2명×2시간", amount=640),
+                            PlanItem(depth=3, name="협의회", formula="15,000원×20명×2회", amount=600))
+        self.assertEqual(quiet, [])
+
+    def test_terms(self):
+        found = self._items(PlanItem(depth=3, name="행사용품", formula="50,000원×2종×1회", amount=100),
+                            PlanItem(depth=3, name="강사료", formula="100,000원×1명×2시간", amount=200))
+        self.assertEqual(len(found), 2)
+        # 학교에 주는 '운영비'(목적사업비)는 운영용품이 아니다
+        self.assertEqual(self._items(PlanItem(depth=3, name="운영비", formula="10,000,000원×1개교×1회",
+                                              amount=10000, bimok_code5="620-03")), [])
+
+    def test_bimok_rules(self):
+        found = self._items(PlanItem(depth=1, name="교원 워크숍", amount=1000),
+                            PlanItem(depth=2, name="식비", formula="9,000원×30명×2식", amount=540,
+                                     bimok_code5="210-04"),
+                            PlanItem(depth=2, name="숙박비", formula="70,000원×30명", amount=2100,
+                                     bimok_code5="210-04"),
+                            PlanItem(depth=2, name="학생식비", formula="11,000원×30명", amount=330,
+                                     bimok_code5="230-02"))
+        words = " ".join(one.message for one in found)
+        for expected in ("230-02", "210-07", "210-12"):
+            self.assertIn(expected, words)
+        exam = self._items(PlanItem(depth=1, name="대학수학능력시험 관리", amount=1000),
+                           PlanItem(depth=2, name="식비", formula="9,000원×30명×2식", amount=540,
+                                    bimok_code5="210-04"))
+        self.assertEqual(exam, [], "수능 급량비는 인정된다")
+
+    def test_unit_price_rise_against_last_year_needs_the_same_path(self):
+        """작년과 비교는 사업+상위+항목이 모두 같을 때만. 이름만 같으면 남의 사업과 견준다."""
+        from edufine_form import FormRow
+        from writing_check import check_writing
+        rows = [FormRow(1, 1, 1, "1. 표본사업", 0), FormRow(2, 2, 2, "가. 연수", 2),
+                FormRow(3, 3, 3, "1) 협의회", 4, code="2300201", basis="12,000원×20명×2회="),
+                FormRow(4, 1, 4, "2. 다른사업", 0), FormRow(5, 2, 5, "가. 연수", 2),
+                FormRow(6, 3, 6, "1) 운영용품", 4, code="2100143", basis="10,000원×5종="),]
+        project = PlanProject(name="표본사업")
+        project.items = [PlanItem(depth=1, name="연수", amount=1000),
+                         PlanItem(depth=2, name="협의회", formula="15,000원×20명×2회", amount=600,
+                                  bimok_code5="210-01"),
+                         PlanItem(depth=2, name="운영용품", formula="50,000원×5종×1회", amount=250,
+                                  bimok_code5="210-01")]
+        report = check_writing("", [project], rows)
+        messages = [one.message for one in report.issues]
+        self.assertTrue(any("12,000원 → 15,000원" in one for one in messages), messages)
+        self.assertTrue(any("230-02 → 올해 210-01" in one for one in messages), messages)
+        self.assertFalse(any("10,000원 →" in one for one in messages), "다른 사업의 운영용품과 견줬다")
+
+    @unittest.skipUnless(PLAN.exists(), "설명서 표본이 없으면 건너뛴다")
+    def test_sample_plan(self):
+        """표본(2027 본예산 설명서)에서 원문으로 확인한 지적. 숫자가 바뀌면 규칙이 바뀐 것이다."""
+        from writing_check import check_writing
+        projects = parse_plan(str(PLAN))
+        report = check_writing(str(PLAN), projects)
+        by_goal = {}
+        for issue in report.issues:
+            by_goal[issue.goal] = by_goal.get(issue.goal, 0) + 1
+        self.assertEqual(by_goal, {"작성-표기": 51, "작성-증감": 30, "작성-산출": 20, "작성-단가": 11}, by_goal)
+        messages = [(one.project, one.message) for one in report.issues]
+        self.assertTrue(any("6. 한글책임교육 지원" in message and "증감사유가 없습니다" in message
+                            for _p, message in messages))
+        self.assertTrue(any(project == "치료지원운영" and "◆방법" in message for project, message in messages))
+        # 감액사유로 적은 절은 사유가 있는 것으로 본다(표기만 따로 말한다)
+        self.assertFalse(any("3. 원격수업 수강지원" in message and "증감사유가 없습니다" in message
+                             for _p, message in messages))
+        self.assertTrue(all(not one.blocking for one in report.issues))
+

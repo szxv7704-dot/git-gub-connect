@@ -29,6 +29,15 @@ STEPS = ["1 자료 선택", "2 검사 결과", "3 비목 확정", "4 입력본 �
 PAGES = ["files", "result", "bimok", "make", "verify"]
 SUPPLEMENT_CAPTIONS = {"goal1": "설명서 검산 오류 (추경)", "goal2": "UBIS 추경 대조 오류",
                        "goal3": "직전 차수 연결", "total": "추경 증감 합계 (천원)"}
+WRITING = "작성 점검"
+WRITING_PREFIX = "작성"
+
+
+def _kind(goal: str, issue) -> str:
+    """목록 구분. 작성요령 점검은 '작성 점검', 그 밖은 심각도(오류)."""
+    return WRITING if goal.startswith(WRITING_PREFIX) else issue.severity
+
+
 VERIFY_IDLE = ("아직 대조하지 않았습니다. 4단계에서 만든 입력본이 있으면 한 줄씩, 없으면 사업별 금액만 맞춰 봅니다.")
 
 
@@ -581,7 +590,9 @@ class App(tk.Tk):
         self.filter_buttons = {}
         chips = tk.Frame(tools, bg=LINE)          # 1px 선으로 이어 붙인 한 덩어리 선택지
         chips.pack(side="left")
-        for name in ("오류",):          # 2.15.0 — 목록에는 오류만 싣는다. '확인 필요'·'안내'는 없다
+        # 2.15.0 — 목록에는 오류만 싣는다. 2.17.0 — 작성요령 점검은 '작성 점검'에 따로 모은다.
+        # 틀렸다고 단정할 수 없는 것들이라 오류와 섞으면 정작 오류가 묻힌다.
+        for name in ("오류", WRITING):
             chip = tk.Button(chips, text=name, font=(FONT, 9), relief="flat", bd=0,
                              padx=14, pady=5, cursor="hand2", highlightthickness=0,
                              activebackground=HEAD, command=lambda n=name: self.set_filter(n))
@@ -798,6 +809,9 @@ class App(tk.Tk):
     def _all_issues(self) -> list:
         rows = [("목표1", issue) for issue in self.session.plan_report.issues]
         rows += [("목표4", issue) for issue in self.session.class_report.issues]
+        writing = getattr(self.session, "writing_report", None)
+        if writing is not None:
+            rows += [(issue.goal, issue) for issue in writing.issues]
         if getattr(self, "goal2_report", None):
             rows += [(issue.goal if issue.goal == "추경연결" else "목표2A", issue)
                      for issue in self.goal2_report.issues]
@@ -815,7 +829,7 @@ class App(tk.Tk):
         self.issues = []
         everything = self._all_issues()
         for goal, issue in everything:
-            if self.filter != "전체" and issue.severity != self.filter:
+            if self.filter != "전체" and _kind(goal, issue) != self.filter:
                 continue
             if needle and needle not in issue.project and needle not in self.session.label_of(issue.project):
                 continue
@@ -823,10 +837,10 @@ class App(tk.Tk):
             tree.insert("", "end", values=(issue.severity, goal_label(goal), self.session.label_of(issue.project),
                                            issue.message, money(issue.left), money(issue.right), signed(issue.gap)),
                         tags=(SEVERITY_TAG.get(issue.severity, "info"),))
-        counts = {"오류": 0}
-        for _goal, issue in everything:
-            counts[issue.severity] = counts.get(issue.severity, 0) + 1
-        colors = {"오류": ERROR}
+        counts = {"오류": 0, WRITING: 0}
+        for goal, issue in everything:
+            counts[_kind(goal, issue)] = counts.get(_kind(goal, issue), 0) + 1
+        colors = {"오류": ERROR, WRITING: WARN}
         for name, chip in self.filter_buttons.items():
             on = name == self.filter
             total = sum(counts.values()) if name == "전체" else counts.get(name, 0)
@@ -837,7 +851,8 @@ class App(tk.Tk):
         if self.session.projects:
             skipped = len(self.session.plan_report.skipped) + (
                 len(self.goal2_report.skipped) if getattr(self, "goal2_report", None) else 0)
-            self.status.configure(text=f"오류 {len(self.issues):,}건 표시 중 (전체 {sum(counts.values()):,}건)"
+            self.status.configure(text=f"{self.filter} {len(self.issues):,}건 표시 중 "
+                                       f"(오류 {counts['오류']:,} · 작성 점검 {counts[WRITING]:,})"
                                        + (f" · '{needle}' 로 거름" if needle else "")
                                        + (f" · 검사하지 못한 것 {skipped}건(지적 목록 엑셀 '검사 못 한 것' 시트)"
                                           if skipped else ""))
@@ -867,7 +882,7 @@ class App(tk.Tk):
         elif not self.issues:
             title = f"'{self.filter}'에 해당하는 지적이 없습니다."
             body = ("찾는 글자를 지우거나 다른 구분을 눌러 보세요." if self.query.get().strip()
-                    else "이 구분은 깨끗합니다. '전체'를 누르면 나머지 지적을 볼 수 있습니다.")
+                    else "이 구분은 깨끗합니다. 왼쪽 위 다른 구분(오류 · 작성 점검)을 눌러 보세요.")
         else:
             title = f"{len(self.issues):,}건 — 줄을 고르면 여기에 전체 내용이 나옵니다."
             body = "F3 으로 다음 지적, Shift+F3 으로 이전 지적으로 옮겨 갑니다."
@@ -1030,6 +1045,8 @@ class App(tk.Tk):
             return issue.project
         if self.page == "detail" and self.find_value.get().strip():
             return self.find_value.get().strip()
+        if str(getattr(issue, "goal", "")).startswith(WRITING_PREFIX) and issue.item:
+            return issue.item
         if self.session.is_supplement and issue.item and issue.item not in ("총괄", "현황", "합계", "세부"):
             return issue.item
         project = next((one for one in self.session.projects if one.name == issue.project), None)
@@ -1098,6 +1115,9 @@ class App(tk.Tk):
         self.detail_note.configure(text=note)
 
         self.find_value.set(project.find_text() if project else issue.project)
+        if goal.startswith(WRITING_PREFIX) and issue.item:
+            # 작성 점검은 걸린 글자 자체를 찾는다. 사업 제목으로 가면 그 사업 안을 다시 훑어야 한다.
+            self.find_value.set(issue.item)
         self._source_buttons(self.detail_actions, goal)
 
         tree = self.detail_tree
@@ -1112,6 +1132,7 @@ class App(tk.Tk):
             return
         if project:
             target = issue_row(project.items, issue)
+            marked = None
             for index, item in enumerate(project.items):
                 code, _detail, _source = self.session.code_for(project, index)
                 if index == target:
@@ -1122,9 +1143,12 @@ class App(tk.Tk):
                     tag = "strong"
                 else:
                     tag = "child"
-                tree.insert("", "end", values=(item.row, item.depth, "   " * (item.depth - 1) + item.name,
-                                               f"{item.bimok_name}({item.bimok_code5})" if item.bimok_code5 else "",
-                                               item.formula, money(item.amount)), tags=(tag,))
+                row_id = tree.insert("", "end", values=(item.row, item.depth, "   " * (item.depth - 1) + item.name,
+                                                        f"{item.bimok_name}({item.bimok_code5})"
+                                                        if item.bimok_code5 else "",
+                                                        item.formula, money(item.amount)), tags=(tag,))
+                if index == target:
+                    marked = row_id
             gap = None if project.base is None else project.base - project.item_total
             matched = gap is not None and abs(gap) <= 1
             note = ("합계가 올해 요구액과 같습니다" if matched
@@ -1137,6 +1161,9 @@ class App(tk.Tk):
                                            money(project.item_total)),
                         tags=("ok" if matched else "error",))
             self._show_outline(tree, project, issue)
+            if marked is not None:
+                # 사업이 길면 칠한 줄이 화면 아래에 있어 안 보인다. 그 줄까지 내려 준다.
+                tree.see(marked)
         self.show("detail")
 
     def _show_supplement(self, tree, issue) -> None:
@@ -1585,7 +1612,7 @@ class App(tk.Tk):
         if getattr(self, "verify_report", None):
             reports["목표2B"] = self.verify_report
         try:
-            export_issues(target, self.session, reports)
+            export_issues(target, self.session, reports, getattr(self.session, "writing_report", None))
         except PermissionError:
             messagebox.showerror("저장할 수 없습니다", f"{Path(target).name} 이(가) 엑셀에서 열려 있는 것 같습니다.")
             return
