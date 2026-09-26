@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-VERSION = "2.15.0"
+VERSION = "2.16.0"
 LABEL = "UI개선"
 NAME = f"예산요구_입력본_만들기_{VERSION}_{LABEL}"
 DIST = "dist_ui"          # 기존 dist\ 의 실행 파일을 덮어쓰지 않는다.

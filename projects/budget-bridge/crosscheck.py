@@ -637,6 +637,21 @@ def _lookup(exact: dict, loose: dict, name: str):
     return None, ""
 
 
+def ubis_name(ubis: dict, name: str) -> str:
+    """설명서 사업명과 짝지어진 UBIS 검토조서의 **원래 표기**. 엑셀에서 Ctrl+F 로 찾을 글자다.
+
+    대조는 띄어쓰기·가운뎃점을 무시하고 맞추지만, 엑셀 찾기는 글자가 그대로여야 걸린다.
+    '특수학교 방과후.돌봄'으로 찾으면 '특수학교 방과후․돌봄'이 적힌 칸을 못 찾는다.
+    짝을 못 찾으면 설명서 이름을 그대로 돌려준다.
+    """
+    key = normalise(name)
+    for original in ubis:
+        if normalise(original) == key:
+            return original
+    same = _loose_index(ubis).get(_squeeze(name)) or []
+    return same[0][0] if len(same) == 1 else name
+
+
 AGGREGATED = ("총액배분", "재원배분", "경상운영비")
 
 

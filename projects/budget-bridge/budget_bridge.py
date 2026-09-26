@@ -21,7 +21,8 @@ from crosscheck import issue_row
 from report_export import export_issues
 from native_ui import FilePage, RoundedButton
 from ui_common import (ACCENT, BODY, ERROR, ERROR_BG, ERROR_INK, FAINT, FONT, GROUND, HEAD, INK, LINE, MUTED, OK, OK_BG,
-                       PANEL, WARN, WARN_BG, SEVERITY_TAG, apply_tags, gap_color, goal_label, money, signed)
+                       PANEL, WARN, WARN_BG, SEVERITY_TAG, apply_tags, gap_color, goal_label, money, open_path,
+                       signed)
 
 TITLE = "예산요구 입력본 만들기"
 STEPS = ["1 자료 선택", "2 검사 결과", "3 비목 확정", "4 입력본 만들기", "5 입력 후 대조"]
@@ -606,12 +607,17 @@ class App(tk.Tk):
         # 읽으려면 상세 화면을 열어야 했다. 고르기만 해도 아래에 전부 보인다.
         self.preview = tk.Frame(frame, bg=PANEL, highlightbackground=LINE, highlightthickness=1)
         self.preview.pack(side="bottom", fill="x", padx=22, pady=(0, 10))
+        # 고른 지적의 원본 파일을 바로 여는 버튼. 목록에서 줄만 골라도 옆에 나온다.
+        self.preview_actions = tk.Frame(self.preview, bg=PANEL)
+        self.preview_actions.pack(side="right", anchor="n", padx=(0, 10), pady=8)
         self.preview_title = label(self.preview, "", 10, True, INK, PANEL, anchor="w")
         self.preview_title.pack(fill="x", padx=14, pady=(10, 2))
         self.preview_text = label(self.preview, "", 10, False, BODY, PANEL, anchor="w", justify="left",
                                   wraplength=1180)
         self.preview_text.pack(fill="x", padx=14, pady=(0, 10))
-        self.preview.bind("<Configure>", lambda e: self.preview_text.configure(wraplength=max(300, e.width - 40)))
+        # 오른쪽 '원본 열기' 버튼 자리만큼 글을 좁힌다. 안 그러면 문장 끝이 버튼 밑으로 잘린다.
+        self.preview.bind("<Configure>", lambda e: self.preview_text.configure(
+            wraplength=max(300, e.width - 50 - self.preview_actions.winfo_reqwidth())))
 
         holder, self.issue_tree = make_tree(
             frame,
@@ -850,7 +856,12 @@ class App(tk.Tk):
                     text=f"[{issue.severity}] {goal_label(goal)} · {self.session.label_of(issue.project)}{where}",
                     fg={"오류": ERROR, "확인 필요": WARN}.get(issue.severity, INK))
                 self.preview_text.configure(text=issue.message)
+                self._source_buttons(self.preview_actions, goal)
+                self.update_idletasks()
+                self.preview_text.configure(wraplength=max(
+                    300, self.preview.winfo_width() - 50 - self.preview_actions.winfo_reqwidth()))
                 return
+        self._source_buttons(self.preview_actions, None)
         if not self.session.projects:
             title, body = "", ""
         elif not self.issues:
@@ -937,9 +948,11 @@ class App(tk.Tk):
         entry = tk.Entry(inner, textvariable=self.find_value, font=("Consolas", 10),
                          relief="solid", bd=1, bg="#FBFCFD")
         entry.pack(side="left", fill="x", expand=True, padx=10, ipady=3)
-        button(inner, "복사", self.copy_find, primary=True).pack(side="left")
-        label(frame, "설명서를 열고 Ctrl+F 에 붙여넣으면 그 줄로 갑니다. "
-                     "한글 파일에는 쪽 번호가 들어 있지 않아 쪽수 대신 찾을 글자를 드립니다.",
+        button(inner, "복사", self.copy_find).pack(side="left")
+        self.detail_actions = tk.Frame(inner, bg=PANEL)
+        self.detail_actions.pack(side="left", padx=(8, 0))
+        label(frame, "'설명서 열기'를 누르면 찾을 글자를 복사한 뒤 파일을 엽니다. 열린 창에서 Ctrl+F → Ctrl+V → Enter "
+                     "하면 그 자리로 갑니다. 한글 파일에는 쪽 번호가 없어 쪽수 대신 찾을 글자를 드립니다.",
               9, False, FAINT, GROUND).pack(anchor="w", padx=26, pady=(4, 0))
 
         legend = tk.Frame(frame, bg=GROUND)
@@ -979,6 +992,74 @@ class App(tk.Tk):
         self.clipboard_append(text)
         self.status.configure(text=f"복사했습니다 — 한글에서 Ctrl+F 에 붙여넣으세요: {text}")
 
+    # ----------------------------------------------------------------- 원본 파일 열기
+    # 지적을 보고 원본과 맞춰 보려면 예전에는 탐색기에서 파일을 찾아 열고, 찾을 글자를
+    # 따로 복사해야 했다. 지적 옆 버튼 하나로 '찾을 글자 복사 + 파일 열기'를 한 번에 한다.
+    # 한글·엑셀을 원격 조종해 그 줄로 옮기지는 않는다. 보안 승인·설치 판본에 따라 PC마다
+    # 다르게 움직여서, 되는 PC와 안 되는 PC가 생기는 것보다 Ctrl+F 한 번이 확실하다.
+    SOURCES = (("plan", "plan_path", "설명서"), ("ubis", "ubis_path", "UBIS 검토조서"),
+               ("classes", "class_path", "분류표"), ("cards", "card_path", "과제카드 목록"))
+    GOAL_SOURCES = {"목표2A": "ubis", "추경연결": "ubis", "목표4": "classes", "과제카드": "cards"}
+
+    def _source_path(self, key: str) -> str:
+        attribute = next(one[1] for one in self.SOURCES if one[0] == key)
+        return (getattr(self.session, attribute, "") or "").strip()
+
+    def _sources_for(self, goal) -> list:
+        """이 지적을 맞춰 볼 파일들. 설명서는 늘, 비교 상대가 있으면 그 파일도."""
+        if goal is None:
+            return []
+        keys = ["plan"] + ([self.GOAL_SOURCES[goal]] if goal in self.GOAL_SOURCES else [])
+        return [key for key in keys if self._source_path(key)]
+
+    def _source_buttons(self, holder, goal) -> None:
+        for child in holder.winfo_children():
+            child.destroy()
+        for key in self._sources_for(goal):
+            name = next(one[2] for one in self.SOURCES if one[0] == key)
+            button(holder, f"{name} 열기", lambda k=key: self.open_source(k),
+                   primary=key == "plan").pack(side="left", padx=(0, 6))
+
+    def _find_for(self, key: str, issue) -> str:
+        """원본 파일에서 Ctrl+F 로 찾을 글자. 설명서는 상세 화면과 같은 글자, UBIS 는 거기 적힌 사업명."""
+        if key == "ubis":
+            from crosscheck import ubis_name
+
+            return ubis_name(self.session.ubis or {}, issue.project)
+        if key != "plan":
+            return issue.project
+        if self.page == "detail" and self.find_value.get().strip():
+            return self.find_value.get().strip()
+        if self.session.is_supplement and issue.item and issue.item not in ("총괄", "현황", "합계", "세부"):
+            return issue.item
+        project = next((one for one in self.session.projects if one.name == issue.project), None)
+        return project.find_text() if project else issue.project
+
+    def open_source(self, key: str) -> None:
+        if not self.issues:
+            return
+        _goal, issue = self.issues[max(0, min(self.current, len(self.issues) - 1))]
+        path = self._source_path(key)
+        name = next(one[2] for one in self.SOURCES if one[0] == key)
+        if not path or not Path(path).exists():
+            messagebox.showwarning("파일을 찾을 수 없습니다",
+                                   f"불러올 때 썼던 {name} 파일이 그 자리에 없습니다. 옮기거나 지웠을 수 있습니다."
+                                   f"\n\n{path}")
+            return
+        find = self._find_for(key, issue)
+        if find:
+            self.clipboard_clear()
+            self.clipboard_append(find)
+        try:
+            open_path(path)
+        except OSError as error:
+            messagebox.showerror("파일을 열지 못했습니다",
+                                 f"{Path(path).name} 을(를) 열 프로그램을 찾지 못했습니다. "
+                                 f"탐색기에서 직접 열어 주세요.\n\n(자세히: {error})")
+            return
+        self.status.configure(text=f"{name} 파일을 열었습니다 — 열린 창에서 Ctrl+F → Ctrl+V → Enter: {find}"
+                              if find else f"{name} 파일을 열었습니다.")
+
     def open_detail(self) -> None:
         children = self.issue_tree.get_children()
         selected = self.issue_tree.selection()
@@ -1017,6 +1098,7 @@ class App(tk.Tk):
         self.detail_note.configure(text=note)
 
         self.find_value.set(project.find_text() if project else issue.project)
+        self._source_buttons(self.detail_actions, goal)
 
         tree = self.detail_tree
         tree.delete(*tree.get_children())

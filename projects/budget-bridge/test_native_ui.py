@@ -244,6 +244,95 @@ class NativeUITests(unittest.TestCase):
         self.assertIn('1번 사업설명서', warned.call_args[0][1])
         app.clear_all()
 
+    def test_issue_opens_its_source_files(self):
+        """지적을 고르면 맞춰 볼 원본 파일 버튼이 나오고, 누르면 찾을 글자를 복사한 뒤 연다.
+
+        설명서 검산은 설명서만, UBIS 대조는 설명서와 UBIS 검토조서 둘 다. 파일이 그새
+        옮겨졌으면 열지 않고 어느 파일인지 말한다.
+        """
+        import os
+        import tempfile
+        from converter import Session
+        from crosscheck import Issue
+        from plan_parser import PlanProject
+
+        app = self.app
+        folder = tempfile.mkdtemp()
+        plan, ubis = os.path.join(folder, '설명서.hwpx'), os.path.join(folder, '검토조서.xlsx')
+        for path in (plan, ubis):
+            open(path, 'wb').close()
+        session = Session(plan_path=plan, ubis_path=ubis)
+        session.projects = [PlanProject(name='표본사업', heading='3. 표본사업')]
+        session.ubis = {'표본 사업': 100.0}      # UBIS 는 띄어 쓴다. 찾을 글자는 UBIS 표기여야 한다
+        app.session = session
+        app.issues = [('목표1', Issue('목표1', '오류', '표본사업', '', '검산 오류', 1, 2)),
+                      ('목표2A', Issue('목표2A', '오류', '표본사업', '', 'UBIS 차이', 1, 2))]
+        app.show('result')
+        app.issue_tree.delete(*app.issue_tree.get_children())
+        for _goal, issue in app.issues:
+            app.issue_tree.insert('', 'end', values=(issue.severity, '', issue.project, issue.message, '', '', ''))
+        labels = lambda: [one.cget('text') for one in app.preview_actions.winfo_children()]
+
+        app._select(0)
+        app.update()
+        self.assertEqual(labels(), ['설명서 열기'])
+        app._select(1)
+        app.update()
+        self.assertEqual(labels(), ['설명서 열기', 'UBIS 검토조서 열기'])
+
+        with patch('budget_bridge.open_path') as opened:
+            app.open_source('ubis')
+            opened.assert_called_once_with(ubis)
+            self.assertEqual(app.clipboard_get(), '표본 사업')
+            app.open_source('plan')
+            self.assertEqual(opened.call_args[0][0], plan)
+            self.assertEqual(app.clipboard_get(), session.projects[0].find_text())
+        self.assertIn('Ctrl+F', app.status.cget('text'))
+
+        app.open_detail()
+        app.update()
+        self.assertEqual([one.cget('text') for one in app.detail_actions.winfo_children()],
+                         ['설명서 열기', 'UBIS 검토조서 열기'])
+
+        os.remove(ubis)
+        with patch('budget_bridge.open_path') as opened, \
+                patch('budget_bridge.messagebox.showwarning') as warned:
+            app.open_source('ubis')
+        opened.assert_not_called()
+        self.assertTrue(warned.called)
+        app.session = Session()
+        app.issues = []
+        app.show('files')
+        self.assertFalse(self.errors)
+
+    def test_flow_arrows_are_bold(self):
+        """단계 사이 화살표는 굵고 곧아야 한다. 가는 연한 물결선은 흐름으로 읽히지 않았다."""
+        flow = self.app.file_view.flow
+        self.app.show('files')
+        self.app.update()
+        flow.set_stage(1, {0})
+        lines = [one for one in flow.find_all() if flow.type(one) == 'line']
+        self.assertEqual(len(lines), 4)
+        for one in lines:
+            self.assertGreaterEqual(float(flow.itemcget(one, 'width')), 3)
+            self.assertEqual(flow.itemcget(one, 'arrow'), 'last')
+            self.assertEqual(len(flow.coords(one)), 4, '곧은 선이어야 한다')
+
+    def test_guide_looks_different_from_work_cards(self):
+        """안내 말풍선은 작업 카드(흰 바탕)와 다른 바탕이어야 한다."""
+        from native_ui import RoundedPanel
+        from ui_common import GUIDE_BG, PANEL
+
+        page = self.app.file_view
+        page.open_guide(5)
+        self.app.update()
+        panel = page.coach.winfo_children()[1]
+        self.assertIsInstance(panel, RoundedPanel)
+        self.assertEqual(panel.fill, GUIDE_BG)
+        self.assertNotEqual(panel.fill, PANEL)
+        self.assertTrue(all(row.fill == PANEL for row in page.rows.values()))
+        page.close_guide(False)
+
     def test_rounded_button_disabled_and_keyboard(self):
         calls = []
         b = RoundedButton(self.app, '확인', lambda: calls.append(1))

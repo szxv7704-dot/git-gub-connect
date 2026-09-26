@@ -29,6 +29,14 @@ OK = "#278579"
 OK_BG = "#E8F5EE"
 GRAY_BG = "#F0F2F5"
 
+# 사용법 안내 말풍선. 작업 카드(흰 바탕)와 한눈에 갈리도록 색을 뒤집는다 — 안내는
+# 어두운 바탕에 밝은 글자. 예전에는 안내도 흰 카드라 어느 것이 안내인지 헷갈렸다.
+GUIDE_BG = "#243447"
+GUIDE_SOFT = "#34495E"      # 말풍선 안의 '자료 받는 경로' 상자, 버튼을 올렸을 때
+GUIDE_TEXT = "#FFFFFF"
+GUIDE_BODY = "#D5E0E8"
+GUIDE_TAG = "#8FD3C8"       # '사용법 안내' 머리표
+
 SEVERITY_TAG = {"오류": "error", "확인 필요": "warn", "안내": "info"}
 SEVERITY_COLOR = {"오류": ERROR, "확인 필요": WARN, "안내": MUTED}
 
@@ -106,3 +114,17 @@ def apply_tags(tree) -> None:
     tree.tag_configure("ok", background=OK_BG, foreground="#1E5C3B")
     tree.tag_configure("child", background=PANEL, foreground=BODY)
     tree.tag_configure("strong", background=PANEL, foreground=INK)
+
+
+def open_path(path: str) -> None:
+    """파일을 그 형식의 기본 프로그램(한글·엑셀)으로 연다. 실패하면 OSError."""
+    import os
+    import subprocess
+    import sys
+
+    if sys.platform.startswith("win"):
+        os.startfile(path)                                  # noqa: S606 - 사용자가 고른 자료 파일
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", path])                    # noqa: S603,S607
+    else:
+        subprocess.Popen(["xdg-open", path])                # noqa: S603,S607

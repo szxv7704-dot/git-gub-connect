@@ -5,8 +5,10 @@ import tkinter as tk
 from tkinter import ttk, font as tkfont
 from pathlib import Path
 
-from ui_common import (ACCENT, ACCENT_DIM, BODY, ERROR, FAINT, FONT, GROUND, HEAD, INK, LINE, MUTED, OK, OK_BG,
-                       PANEL, WARN, year_of)
+from ui_common import (ACCENT, ACCENT_DIM, BODY, ERROR, FAINT, FONT, GROUND, GUIDE_BG, GUIDE_BODY, GUIDE_SOFT,
+                       GUIDE_TAG, GUIDE_TEXT, HEAD, INK, LINE, MUTED, OK, OK_BG, PANEL, WARN, year_of)
+
+FLOW_IDLE = "#8FA7B8"       # 아직 가지 않은 단계 사이 화살표. 연하면 흐름이 안 보인다
 
 
 def rounded(canvas, x1, y1, x2, y2, radius=14, **kw):
@@ -20,8 +22,11 @@ def rounded(canvas, x1, y1, x2, y2, radius=14, **kw):
 
 class RoundedButton(tk.Canvas):
     """Keyboard-operable rounded button; retains the configure/invoke contract."""
-    def __init__(self, parent, text, command=None, primary=False, width=None):
+    def __init__(self, parent, text, command=None, primary=False, width=None, hover=None, outline=None):
         self._text, self._command = text, command
+        # 어두운 안내 말풍선 위에서는 기본 색(밝은 바탕에 맞춘 것)을 쓸 수 없다. 올렸을 때 색과
+        # 테두리를 따로 받는다. 없으면 예전 그대로다.
+        self._hover_fill, self._outline = hover, outline
         self._state, self._hover = "normal", False
         self._fill = ACCENT if primary else PANEL
         self._fg = PANEL if primary else BODY
@@ -114,11 +119,12 @@ class RoundedButton(tk.Canvas):
         if w < 3:
             return
         disabled = self._state == "disabled"
-        fill = HEAD if disabled else (ACCENT_DIM if self._primary else HEAD) if self._hover else self._fill
+        fill = HEAD if disabled else (self._hover_fill or (ACCENT_DIM if self._primary else HEAD)) \
+            if self._hover else self._fill
         foreground = MUTED if disabled else self._fg
         focused = self.focus_get() == self
         rounded(self, 2, 2, w-2, h-2, 13, fill=fill,
-                outline=ACCENT if focused else self._fill if self._primary else LINE,
+                outline=ACCENT if focused else self._outline or (self._fill if self._primary else LINE),
                 width=2 if focused else 1)
         self.create_text(w/2, h/2, text=self._text, fill=foreground, font=self._font)
 
@@ -194,9 +200,12 @@ class ProcessFlow(tk.Canvas):
             self.create_text(x+16, 54, text="✓" if finished and not current else f"{i+1}",
                              fill=PANEL if (current or finished) else MUTED, font=(FONT, 10, "bold"))
             if i < 4:
-                self.create_line(x+42, 54, x+col*.55, 50, x+col*.8, 58, x+col-10, 54,
-                                 smooth=True, splinesteps=24, arrow="last", arrowshape=(8, 10, 5),
-                                 width=2, fill=OK if finished else "#B7CCD8")
+                # 단계 사이 화살표. 예전 것은 가늘고(2px) 연한 물결선에 촉도 작아서 흐름이라기보다
+                # 밑줄처럼 보였다. 곧게 긋고 3px·큰 촉으로 바꾸고, 색으로 상태를 말한다:
+                # 끝낸 구간은 초록, 지금 단계에서 다음으로 가는 구간은 강조색, 나머지는 회청색.
+                leg = OK if finished and not current else ACCENT if current else FLOW_IDLE
+                self.create_line(x+44, 54, x+col-14, 54, arrow="last", arrowshape=(13, 15, 7),
+                                 width=3, capstyle="round", fill=leg)
             self.create_text(x, 88, anchor="w", text=title, font=(FONT, 9, "bold"),
                              fill=ACCENT if current else INK)
             self.create_text(x, 108, anchor="w", text=note, font=(FONT, 8), fill=MUTED)
@@ -470,8 +479,13 @@ class FilePage(tk.Frame):
         rounded(c, 1, 1, 37, 39, 12, fill=ACCENT if active else OK_BG if selected else HEAD, outline="")
         number = next(x[1] for x in self.app.FILE_CARDS if x[0] == key)
         c.create_text(19, 20, text=number, font=(FONT, 10, "bold"), fill=PANEL if active else OK if selected else MUTED)
-        if active and c.winfo_height() > 50:
-            c.create_line(19, c.winfo_height(), 19, 44, arrow="last", width=2, fill=ACCENT)
+
+    @staticmethod
+    def _guide_button(parent, label, command):
+        """어두운 말풍선 위의 보조 버튼. 바탕과 같은 색에 밝은 테두리·글자."""
+        widget = RoundedButton(parent, label, command, hover=GUIDE_SOFT, outline="#5A7288")
+        widget.configure(bg=GUIDE_BG, fg=GUIDE_TEXT)
+        return widget
 
     def _guide_key(self, index):
         if index >= 4:
@@ -491,17 +505,20 @@ class FilePage(tk.Frame):
         outer = tk.Frame(host, bg=GROUND)
         outer.pack(fill="x", pady=(0, 16))
         self.coach = outer
-        leader = tk.Canvas(outer, width=54, height=70, bg=GROUND, bd=0, highlightthickness=0)
-        leader.pack(side="left", anchor="n")
-        leader.create_line(50, 44, 33, 44, 33, 12, 33, 2, smooth=True,
-                           arrow="last", arrowshape=(7, 9, 4), fill=ACCENT, width=2)
-        panel = RoundedPanel(outer, border=ACCENT, padding=18)
-        panel.pack(side="left", fill="x", expand=True)
+        # 안내는 작업 카드와 **달라 보여야** 한다. 예전에는 안내도 흰 카드라 목록 사이에
+        # 끼면 어느 것이 안내이고 어느 것이 넣을 자료인지 구분되지 않았다. 색을 뒤집은
+        # 말풍선(어두운 바탕·밝은 글자)으로 바꾸고, 위쪽 꼭지로 설명하는 칸을 직접 가리킨다.
+        notch = tk.Canvas(outer, height=14, bg=GROUND, bd=0, highlightthickness=0)
+        notch.pack(fill="x")
+        notch.create_polygon(30, 14, 44, 0, 58, 14, fill=GUIDE_BG, outline=GUIDE_BG)
+        panel = RoundedPanel(outer, fill=GUIDE_BG, border=GUIDE_BG, padding=20)
+        panel.pack(fill="x", expand=True)
         inner = panel.inner
-        top = tk.Frame(inner, bg=PANEL)
+        top = tk.Frame(inner, bg=GUIDE_BG)
         top.pack(fill="x")
-        text(top, "자료 안내" if index >= 4 else "전체 흐름" if index == 0 else "이 도구가 하는 일", 9, True, ACCENT).pack(side="left")
-        RoundedButton(top, "닫기", self.close_guide).pack(side="right")
+        kind = "자료 안내" if index >= 4 else "전체 흐름" if index == 0 else "이 도구가 하는 일"
+        text(top, f"?  사용법 안내  ·  {kind}", 9, True, GUIDE_TAG).pack(side="left")
+        self._guide_button(top, "닫기  (Esc)", self.close_guide).pack(side="right")
         if index >= 4:
             entry = self.app.FILE_CARDS[index-4]
             title, body, route = f"{entry[1]}. {entry[2]}", entry[5], entry[6]
@@ -514,31 +531,33 @@ class FilePage(tk.Frame):
                 ("입력본 만들기 · K-에듀파인 형식", "1번 사업설명서의 항목 → 올해 입력본\n2번 지난 K-에듀파인 파일에서 양식과 원가통계비목(7자리)을 배웁니다."),
             )[index]
             route = ""
-        heading = text(inner, title, 13, True, INK, anchor="w", justify="left")
-        heading.pack(fill="x", pady=(8, 8))
-        desc = text(inner, body, 10, color=BODY, anchor="w", justify="left")
+        heading = text(inner, title, 13, True, GUIDE_TEXT, anchor="w", justify="left")
+        heading.pack(fill="x", pady=(10, 8))
+        desc = text(inner, body, 10, color=GUIDE_BODY, anchor="w", justify="left")
         desc.pack(fill="x")
         self._wrap(inner, heading)
         self._wrap(inner, desc)
         if route:
-            source = tk.Frame(inner, bg=HEAD)
+            source = tk.Frame(inner, bg=GUIDE_SOFT)
             source.pack(fill="x", pady=(14, 4))
-            text(source, "자료 받는 경로", 9, True, ACCENT).pack(anchor="w", padx=12, pady=(10, 4))
-            route_text = text(source, route, 9, color=INK, anchor="w", justify="left")
+            text(source, "자료 받는 경로", 9, True, GUIDE_TAG).pack(anchor="w", padx=12, pady=(10, 4))
+            route_text = text(source, route, 9, color=GUIDE_TEXT, anchor="w", justify="left")
             route_text.pack(fill="x", padx=12, pady=(0, 12))
             self._wrap(source, route_text)
-        foot = tk.Frame(inner, bg=PANEL)
-        foot.pack(fill="x", pady=(14, 0))
-        RoundedButton(foot, "건너뛰기", self.close_guide).pack(side="left")
-        text(foot, f"{index+1} / 9", 9, color=MUTED).pack(side="left", padx=12)
+        foot = tk.Frame(inner, bg=GUIDE_BG)
+        foot.pack(fill="x", pady=(16, 0))
+        self._guide_button(foot, "건너뛰기", self.close_guide).pack(side="left")
+        text(foot, f"{index+1} / 9", 9, color=GUIDE_BODY).pack(side="left", padx=12)
         next_button = RoundedButton(foot, "시작하기" if index == 8 else "다음 →",
-                                     self.close_guide if index == 8 else lambda: self.open_guide(index+1), True)
+                                    self.close_guide if index == 8 else lambda: self.open_guide(index+1),
+                                    hover=HEAD, outline=PANEL)
+        next_button.configure(bg=PANEL, fg=INK, font=(FONT, 10, "bold"))
         next_button.pack(side="right")
-        back = RoundedButton(foot, "이전", lambda: self.open_guide(index-1))
-        back.pack(side="right", padx=(0, 6))
-        back.configure(state="disabled" if index == 0 else "normal")
+        if index > 0:
+            self._guide_button(foot, "이전", lambda: self.open_guide(index-1)).pack(side="right", padx=(0, 6))
         tk.Checkbutton(inner, text="다음 실행부터 자동 안내 열지 않기", variable=self.hide_again,
-                       bg=PANEL, fg=MUTED, font=(FONT, 9), activebackground=PANEL,
+                       bg=GUIDE_BG, fg=GUIDE_BODY, font=(FONT, 9), activebackground=GUIDE_BG,
+                       activeforeground=GUIDE_TEXT, selectcolor=GUIDE_SOFT,
                        highlightthickness=0).pack(anchor="w", pady=(10, 0))
         self.bind_wheel(outer)
         self.mark_files()

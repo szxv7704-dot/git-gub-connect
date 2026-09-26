@@ -675,6 +675,25 @@ class YearCheckTests(unittest.TestCase):
                                         "last_year": "2026(k에듀파인).xlsx"}), {})
 
 
+
+class UbisNameTests(unittest.TestCase):
+    """'UBIS 검토조서 열기'가 복사하는 찾을 글자. 엑셀 찾기는 글자가 그대로여야 걸린다."""
+
+    def test_exact_name_is_kept(self):
+        from crosscheck import ubis_name
+        self.assertEqual(ubis_name({"교육공무직원인건비관리": 1.0}, "교육공무직원인건비관리"), "교육공무직원인건비관리")
+
+    def test_spacing_and_middle_dot_follow_ubis(self):
+        from crosscheck import ubis_name
+        ubis = {"특수학교 방과후\u2024돌봄 지원 강화": 1.0, "초등교육과정 전문성 신장": 2.0}
+        self.assertEqual(ubis_name(ubis, "초등교육과정전문성신장"), "초등교육과정 전문성 신장")
+        self.assertEqual(ubis_name(ubis, "특수학교 방과후·돌봄 지원 강화"), "특수학교 방과후\u2024돌봄 지원 강화")
+
+    def test_unknown_or_ambiguous_falls_back_to_plan_name(self):
+        from crosscheck import ubis_name
+        self.assertEqual(ubis_name({}, "없는 사업"), "없는 사업")
+        self.assertEqual(ubis_name({"가 나": 1.0, "가·나": 2.0}, "가나"), "가나")
+
 if __name__ == "__main__":
     unittest.main()
 
