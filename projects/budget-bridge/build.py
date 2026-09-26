@@ -53,8 +53,9 @@ def run(arguments: list[str], why: str) -> None:
 
 
 def sample_folder() -> Path | None:
-    """표본 파일이 있는 폴더. 이 폴더 → 작업 폴더 순으로 찾는다."""
-    for folder in (HERE, SAMPLE_FOLDER):
+    """표본 파일이 있는 폴더. 환경변수 UBIS_SAMPLES → 이 폴더 → 작업 폴더 순으로 찾는다."""
+    env = [Path(one) for one in os.environ.get("UBIS_SAMPLES", "").split(os.pathsep) if one]
+    for folder in (*env, HERE, SAMPLE_FOLDER):
         if all((folder / name).exists() for name in SAMPLES):
             return folder
     return None

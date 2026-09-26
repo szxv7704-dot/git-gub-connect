@@ -26,3 +26,14 @@ dist/
 !samples/example-files/**
 !releases/completed/**
 
+
+# budget-bridge: PyInstaller outputs (build.py regenerates the .spec) and real budget samples
+build_ui/
+dist_ui/
+*.toc
+*.pyz
+*.pkg
+warn-*.txt
+xref-*.html
+projects/budget-bridge/*.spec
+*.hwpx
